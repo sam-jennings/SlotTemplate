@@ -1,4 +1,4 @@
-// main.cpp  —  template runner (C++14)
+// main.cpp  â€”  template runner (C++14)
 
 #include <iostream>
 #include <fstream>
@@ -91,6 +91,7 @@ int main(int argc, char** argv) {
     const std::string outputFileName = baseName + "_output.txt";
     const std::string randomLogFileName = baseName + "_randomLog.txt";
     const std::string gameDetailsFileName = baseName + "_gameDetails.txt";
+    const std::string gameSpecificStatsFileName = baseName + "_gameSpecificStats.txt";
 
     // -------------------------------
     // 3) Resolve sim toggles + output
@@ -152,7 +153,7 @@ int main(int argc, char** argv) {
         finalStats.calculateStandardDeviations();
 
         // Output core data (+ optional game-specific writer if you set it elsewhere)
-        finalStats.outputData(out);
+        finalStats.outputData(out, gameSpecificStatsFileName);
         finalStats.printFrequencyTables();
 
     }

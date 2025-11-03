@@ -6,6 +6,9 @@
 #include <cmath> // Include for std::sqrt
 #include <unordered_map>
 #include <mutex>
+#include <string>
+#include <iomanip>
+#include <iostream>
 
 #include <utility> // For std::pair
 #include <functional> // For hash specialization
@@ -21,8 +24,8 @@ namespace std {
 
 class Stats {
 private:
-	std::mutex statsMutex;
-	std::function<void(const Stats&, std::ostream&)> gameSpecificWriter_;
+        std::mutex statsMutex;
+        std::function<void(const Stats&, std::ostream&)> gameSpecificWriter_;
 
 	long long numIterations;
 	long long baseGameHits = 0;
@@ -42,7 +45,130 @@ private:
 	double totalWinnings = 0.0;
 	std::pair<int, double> moneyEntry; // <count, amount>
 
-	std::unordered_map<std::pair<int, int>, long long, std::hash<std::pair<int, int>>> scaleFrequency;
+        std::unordered_map<std::pair<int, int>, long long, std::hash<std::pair<int, int>>> scaleFrequency;
+
+        void writeDefaultStats(std::ostream& file) const {
+                file << "RTP and Standard Deviation Breakdown\n";
+                file << "Name\tRTP\tStDev\n";
+
+                for (size_t i = 0; i < rtpHeaders.size(); ++i) {
+                        double rtp = payVector[i] / (numIterations * costPerSpin);
+                        double stDev = standardDeviations[i];
+                        file << rtpHeaders[i] << '\t' << std::setprecision(6) << rtp << '\t' << std::setprecision(4) << stDev << '\n';
+                }
+                file << "----------------------------------------\n";
+
+                file << "Iterations\t" << numIterations << '\n';
+                file << "Total Pay\t" << payVector[3] << '\n';
+
+                file << "Feature Hits\n";
+
+                file << "Feature\tHits\tHit Rate\n";
+
+                std::vector<std::pair<std::string, long long>> sortedFeatures(featureHits.begin(), featureHits.end());
+
+                std::sort(sortedFeatures.begin(), sortedFeatures.end(),
+                        [](const auto& a, const auto& b) {
+                                return a.second > b.second;
+                        });
+
+                for (const auto& pair : sortedFeatures) {
+                        long long hits = pair.second;
+                        double hitRate = (hits > 0) ? numIterations / static_cast<double>(hits) : 0.0;
+                        file << pair.first << '\t' << hits << '\t' << std::setprecision(8) << hitRate << '\n';
+                }
+
+                file << "----------------------------------------\n";
+
+                file << "Base Hits\n";
+                file << "Symbol";
+                for (size_t i = 0; i < baseSymHits[0].size(); ++i) {
+                        file << '\t' << i + 1;
+                }
+                file << '\n';
+                for (size_t i = 0; i < baseSymHits.size(); ++i) {
+                        file << symbolStructure.getSymbols()[i];
+                        for (const auto& hits : baseSymHits[i]) {
+                                file << '\t' << hits;
+                        }
+                        file << '\n';
+                }
+
+                file << "----------------------------------------\n";
+
+                file << "Base Pays\n";
+                file << "Symbol";
+                for (size_t i = 0; i < baseSymPays[0].size(); ++i) {
+                        file << '\t' << i + 1;
+                }
+                file << '\n';
+                for (size_t i = 0; i < baseSymPays.size(); ++i) {
+                        file << symbolStructure.getSymbols()[i];
+                        for (const auto& hits : baseSymPays[i]) {
+                                file << '\t' << hits;
+                        }
+                        file << '\n';
+                }
+                file << "----------------------------------------\n";
+                file << "Average Free Spins: " << '\t' << calculateAverageFrequency(freeSpinsFreq) << '\n';
+                file << "----------------------------------------\n";
+        }
+
+        void writeGameSpecificStats(std::ostream& file) const {
+                file << "Average Tumbles: " << '\t' << calculateAverageFrequency(tumbleFreq) << '\n';
+                file << "----------------------------------------\n";
+                file << "Tumble Frequencies\n";
+                file << "Number Tumble\tFrequency\n";
+                for (const auto& pair : tumbleFreq) {
+                        file << pair.first << '\t' << pair.second << '\n';
+                }
+                file << "----------------------------------------\n";
+
+                file << "Average Final Multiplier: " << '\t' << calculateAverageFrequency(multFreq) << '\n';
+                file << "Final Multiplier Frequencies\n";
+                file << "Multiplier\tFrequency\n";
+                for (const auto& pair : multFreq) {
+                        file << pair.first << '\t' << pair.second << '\n';
+                }
+                file << "----------------------------------------\n";
+                file << "Average Final Multiplier Free Spins: " << '\t' << calculateAverageFrequency(multFreqFree) << '\n';
+                file << "Final Multiplier Frequencies Free Spins\n";
+                file << "Multiplier\tFrequency\n";
+                for (const auto& pair : multFreqFree) {
+                        file << pair.first << '\t' << pair.second << '\n';
+                }
+                file << "----------------------------------------\n";
+                file << "Final Multiplier Frequencies Free Spins (split by initial multiplier)\n";
+
+                std::vector<int> initKeys;
+                initKeys.reserve(multFreqFreeByInit.size());
+                for (const auto& kv : multFreqFreeByInit) initKeys.push_back(kv.first);
+                std::sort(initKeys.begin(), initKeys.end());
+
+                for (int init : initKeys) {
+                        const auto& freq = multFreqFreeByInit.at(init);
+
+                        double avg = calculateAverageFrequency(const_cast<std::unordered_map<int, long long>&>(freq));
+
+                        file << "Init Multiplier: " << init << "\n";
+                        file << "Average Final Multiplier (init " << init << "):\t" << avg << "\n";
+                        file << "Final Mult\tFrequency\n";
+
+                        std::vector<std::pair<int, long long>> rows(freq.begin(), freq.end());
+                        std::sort(rows.begin(), rows.end(),
+                                [](auto& a, auto& b) { return a.first < b.first; });
+
+                        for (const auto& p : rows) {
+                                file << p.first << '\t' << p.second << '\n';
+                        }
+                        file << "----------------------------------------\n";
+                }
+
+                if (gameSpecificWriter_) {
+                        printSectionHeader(file, "Game-Specific Report");
+                        gameSpecificWriter_(*this, file);
+                }
+        }
 
 public:
 	explicit Stats(SymbolStructure& symbolStructure, const std::vector<std::string>& rtpHeaders, double costPerSpin)
@@ -289,135 +415,17 @@ public:
 		totalWinnings += amount;
 	}
 
-	void outputData(std::ofstream& file) const {
-		file << "RTP and Standard Deviation Breakdown\n";
-		file << "Name\tRTP\tStDev\n";
+        void outputData(std::ofstream& defaultFile, const std::string& gameSpecificFilename) const {
+                writeDefaultStats(defaultFile);
 
-		for (size_t i = 0; i < rtpHeaders.size(); ++i) {
-			double rtp = payVector[i] / (numIterations * costPerSpin);
-			double stDev = standardDeviations[i];
-			file << rtpHeaders[i] << '\t' << std::setprecision(6) << rtp << '\t' << std::setprecision(4) << stDev << '\n';
-		}
-		file << "----------------------------------------\n";
+                std::ofstream gameSpecificFile(gameSpecificFilename);
+                if (!gameSpecificFile.is_open()) {
+                        std::cerr << "Failed to open game-specific stats file: " << gameSpecificFilename << std::endl;
+                        return;
+                }
 
-		file << "Iterations\t" << numIterations << '\n';
-		file << "Total Pay\t" << payVector[3] << '\n';
-
-		// Sort featureHits by name as featureHitsOrdered
-		file << "Feature Hits\n";
-
-		file << "Feature\tHits\tHit Rate\n";
-
-		// Copy map to a vector for sorting
-		std::vector<std::pair<std::string, long long>> sortedFeatures(featureHits.begin(), featureHits.end());
-
-		// Sort by hits in descending order
-		std::sort(sortedFeatures.begin(), sortedFeatures.end(),
-			[](const auto& a, const auto& b) {
-				return a.second > b.second; // Compare feature hit counts
-			});
-
-		// Output sorted results
-		for (const auto& pair : sortedFeatures) {
-			long long hits = pair.second;
-			double hitRate = (hits > 0) ? numIterations / static_cast<double>(hits) : 0.0;
-			file << pair.first << '\t' << hits << '\t' << std::setprecision(8) << hitRate << '\n';
-		}
-
-		file << "----------------------------------------\n";
-
-		file << "Base Hits\n";
-		file << "Symbol";
-		for (size_t i = 0; i < baseSymHits[0].size(); ++i) {
-			file << '\t' << i + 1;
-		}
-		file << '\n';
-		for (size_t i = 0; i < baseSymHits.size(); ++i) {
-			file << symbolStructure.getSymbols()[i];
-			for (const auto& hits : baseSymHits[i]) {
-				file << '\t' << hits;
-			}
-			file << '\n';
-		}
-
-		file << "----------------------------------------\n";
-
-		file << "Base Pays\n";
-		file << "Symbol";
-		for (size_t i = 0; i < baseSymPays[0].size(); ++i) {
-			file << '\t' << i + 1;
-		}
-		file << '\n';
-		for (size_t i = 0; i < baseSymPays.size(); ++i) {
-			file << symbolStructure.getSymbols()[i];
-			for (const auto& hits : baseSymPays[i]) {
-				file << '\t' << hits;
-			}
-			file << '\n';
-		}
-		file << "----------------------------------------\n";
-		file << "Average Free Spins: " << '\t' << calculateAverageFrequency(freeSpinsFreq) << '\n';
-		file << "----------------------------------------\n";
-	
-		file << "Average Tumbles: " << '\t' << calculateAverageFrequency(tumbleFreq) << '\n';
-		file << "----------------------------------------\n";
-		file << "Tumble Frequencies\n";
-		file << "Number Tumble\tFrequency\n";
-		for (const auto& pair : tumbleFreq) {
-			file << pair.first << '\t' << pair.second << '\n';
-		}
-		file << "----------------------------------------\n";
-
-		file << "Average Final Multiplier: " << '\t' << calculateAverageFrequency(multFreq) << '\n';
-		file << "Final Multiplier Frequencies\n";
-		file << "Multiplier\tFrequency\n";
-		for (const auto& pair : multFreq) {
-			file << pair.first << '\t' << pair.second << '\n';
-		}
-		file << "----------------------------------------\n";
-		file << "Average Final Multiplier Free Spins: " << '\t' << calculateAverageFrequency(multFreqFree) << '\n';
-		file << "Final Multiplier Frequencies Free Spins\n";
-		file << "Multiplier\tFrequency\n";
-		for (const auto& pair : multFreqFree) {
-			file << pair.first << '\t' << pair.second << '\n';
-		}
-		file << "----------------------------------------\n";
-		file << "Final Multiplier Frequencies Free Spins (split by initial multiplier)\n";
-
-		std::vector<int> initKeys;
-		initKeys.reserve(multFreqFreeByInit.size());
-		for (const auto& kv : multFreqFreeByInit) initKeys.push_back(kv.first);
-		std::sort(initKeys.begin(), initKeys.end());
-
-		for (int init : initKeys) {
-			const auto& freq = multFreqFreeByInit.at(init);
-
-			// Average for this init
-			double avg = calculateAverageFrequency(const_cast<std::unordered_map<int, long long>&>(freq));
-
-			// Dump a table per init
-			file << "Init Multiplier: " << init << "\n";
-			file << "Average Final Multiplier (init " << init << "):\t" << avg << "\n";
-			file << "Final Mult\tFrequency\n";
-
-			std::vector<std::pair<int, long long>> rows(freq.begin(), freq.end());
-			std::sort(rows.begin(), rows.end(),
-				[](auto& a, auto& b) { return a.first < b.first; });
-
-			for (const auto& p : rows) {
-				file << p.first << '\t' << p.second << '\n';
-			}
-			file << "----------------------------------------\n";
-		}
-		// -----------------------
-// Game-specific appendix
-// -----------------------
-		if (gameSpecificWriter_) {
-			printSectionHeader(file, "Game-Specific Report");
-			gameSpecificWriter_(*this, file);
-		}
-
-	}
+                writeGameSpecificStats(gameSpecificFile);
+        }
 
 	void printFrequencyTableToFile(const std::string& categoryName, const std::unordered_map<double, long long>& frequencyMap) const {
 		std::string filename = "pay_frequency_" + categoryName + ".txt";
