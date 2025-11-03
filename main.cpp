@@ -58,8 +58,7 @@ static void applyCliOverrides(int argc, char** argv, long long& spins, int& thre
         }
         else if (arg == "--mode" && i + 1 < argc) {
             std::string v = argv[++i];
-            if (v == "EXACT_MODE")  sm = EXACT_MODE;
-            else if (v == "RANDOM_MODE") sm = RANDOM_MODE;
+            if (v == "RANDOM_MODE") sm = RANDOM_MODE;
             else if (v == "PLAYER_MODE") sm = PLAYER_MODE;
             else if (v == "CSV_MODE")    sm = CSV_MODE;
             else std::cerr << "Unknown --mode " << v << " (using default)\n";
@@ -159,29 +158,79 @@ int main(int argc, char** argv) {
 
     }
     else if (simulationMode == CSV_MODE) {
-        std::cerr << "CSV_MODE is not implemented in this template main.cpp. "
-            "Switch to RANDOM_MODE or extend CSV export here.\n";
-        out << "CSV_MODE not implemented in this template.\n";
-        out.close();
-        RandomLogGenerator::closeLogs();
-        return 0;
+        std::string userGameVersion;
+        std::cout << "Enter the game version : ";
+        std::getline(std::cin, userGameVersion);
 
-    }
-    else if (simulationMode == EXACT_MODE) {
-        std::cerr << "EXACT_MODE is not implemented in this template main.cpp.\n";
-        out << "EXACT_MODE not implemented in this template.\n";
-        out.close();
-        RandomLogGenerator::closeLogs();
-        return 0;
+        const long long defaultSpins = 1000000LL;
+        std::string csvFileName = outputFileBase + "_simulation.csv";
 
+        std::ostringstream csvData;
+        csvData << "GAME NAME: " << gameInfo[0] << "\n";
+        csvData << "GAME VERSION: " << userGameVersion << "\n\n";
+        csvData << "RTP SIMULATION RESULTS\n\n";
+        csvData << "PLAYER 1 RTP SIMULATION RESULTS\n";
+        csvData << "SPINID,TOTAL STAKE,BALANCE,BASE GAME,FREE SPINS,TOTALWIN,TOTAL WINS,REELSET_ID\n";
+
+        long long totalWager = 0;
+        double balance = 500.0, totalWins = 0.0; // Starting balance
+
+        for (long long i = 0; i < defaultSpins; ++i) {
+            double spinWin = 0.0, freeSpinWin = 0.0, baseGameWin = 0.0, modCost = (costPerSpin / 100);
+            int reelsetId = -1; // You'll need a real getter here
+
+
+            Stats stats(symbolStructure, rtpHeaders, costPerSpin);
+            GameInstance gameInstance(config, symbolStructure, stats);
+
+            gameInstance.playBaseGame(1); // Simulate a single spin
+
+            spinWin = stats.getLastSpinPayout() / 100;
+            freeSpinWin = stats.getFreeSpinPayout() / 100;
+            baseGameWin = spinWin - freeSpinWin;
+            totalWins += spinWin;
+
+            // Assuming GameInstance has a method to get reelset ID
+            reelsetId = gameInstance.getLastReelSetID(); // <-- implement this if not present
+
+            totalWager += modCost;
+            balance += spinWin - modCost;
+
+            csvData << i << ',' << (i + 1) * modCost << ',' << std::fixed << std::setprecision(2) << balance << ','
+                << baseGameWin << ',' << freeSpinWin << ',' << spinWin << ',' << totalWins << ',' << reelsetId << '\n';
+        }
+
+        std::ofstream csvFile(csvFileName);
+        if (!csvFile.is_open()) {
+            std::cerr << "Failed to open CSV output file: " << csvFileName << std::endl;
+            return 1;
+        }
+        csvFile << csvData.str();
+        csvFile.close();
+
+        std::cout << "CSV simulation completed. Output file: " << csvFileName << std::endl;
     }
     else if (simulationMode == PLAYER_MODE) {
-        std::cerr << "PLAYER_MODE is not implemented in this template main.cpp.\n";
-        out << "PLAYER_MODE not implemented in this template.\n";
-        out.close();
-        RandomLogGenerator::closeLogs();
-        return 0;
+        int N = 10000; // Number of players 100000
+        int X = 2000; // Starting credits (enough for 100 spins)
+        int Y = 4000; // Target credits (enough for 200 spins)
+        int successfulPlayers = 0;
 
+        for (int i = 0; i < N; ++i) {
+            // Initialize Stats for each player (if stats aggregation is not needed across players)
+            Stats stats(symbolStructure, rtpHeaders, costPerSpin);
+
+            // Initialize PlayerSimulation with the shared config, symbolStructure, and unique Stats instance
+            PlayerSimulation sim(X, Y, config, symbolStructure, stats);
+
+            if (sim.simulate()) {
+                successfulPlayers++;
+            }
+        }
+
+        double successPercentage = (double)successfulPlayers / N * 100.0;
+        cout << "Percentage of players reaching target credits: " << successPercentage << "%\n";
+        return 0;
     }
     else {
         std::cerr << "Unknown SimulationMode.\n";

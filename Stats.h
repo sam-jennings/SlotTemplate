@@ -160,7 +160,7 @@ private:
                 for (int init : initKeys) {
                         const auto& freq = multFreqFreeByInit.at(init);
 
-                        double avg = calculateAverageFrequency(freq);
+                        double avg = calculateAverageFrequency(const_cast<std::unordered_map<int, long long>&>(freq));
 
                         file << "Init Multiplier: " << init << "\n";
                         file << "Average Final Multiplier (init " << init << "):\t" << avg << "\n";

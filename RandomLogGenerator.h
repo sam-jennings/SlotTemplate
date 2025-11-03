@@ -8,7 +8,7 @@
 #include <vector>
 #include <stdexcept>
 #include <algorithm>
-#include "nlohmann/json.hpp"
+#include "json.hpp"
 
 using json = nlohmann::json;
 
@@ -25,7 +25,6 @@ enum LogMode {
     REPLAY
 };
 enum SimulationMode {
-    EXACT_MODE,
     RANDOM_MODE,
     PLAYER_MODE,
     CSV_MODE

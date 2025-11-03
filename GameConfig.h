@@ -9,7 +9,7 @@
 #include <stdexcept>
 #include <iostream>
 
-#include "nlohmann/json.hpp"
+#include "json.hpp"
 using nlohmann::json;
 
 #include "Symbols.h"
