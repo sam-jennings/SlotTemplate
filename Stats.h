@@ -47,6 +47,18 @@ private:
 
         std::unordered_map<std::pair<int, int>, long long, std::hash<std::pair<int, int>>> scaleFrequency;
 
+        template <typename Map, typename Key>
+        void incrementCounter(Map& container, const Key& key) {
+                std::lock_guard<std::mutex> lock(statsMutex);
+                ++container[key];
+        }
+
+        template <typename Map, typename OuterKey, typename InnerKey>
+        void incrementNestedCounter(Map& container, const OuterKey& outer, const InnerKey& inner) {
+                std::lock_guard<std::mutex> lock(statsMutex);
+                ++container[outer][inner];
+        }
+
         void writeDefaultStats(std::ostream& file) const {
                 file << "RTP and Standard Deviation Breakdown\n";
                 file << "Name\tRTP\tStDev\n";
@@ -187,13 +199,22 @@ public:
 		baseSymHits.resize(numSymbols, std::vector<long long>(maxLength, 0));
 		baseSymPays.resize(numSymbols, std::vector<double>(maxLength, 0.0));
 	}
-	// Set a custom writer for game-specific reporting (optional).
-	void setGameSpecificWriter(std::function<void(const Stats&, std::ostream&)> fn) {
-		gameSpecificWriter_ = std::move(fn);
-	}
-	void printSectionHeader(std::ostream& out, const std::string& title) const {
-		out << "\n==== " << title << " ====\n";
-	}
+        // Set a custom writer for game-specific reporting (optional).
+        void setGameSpecificWriter(std::function<void(const Stats&, std::ostream&)> fn) {
+                gameSpecificWriter_ = std::move(fn);
+        }
+
+        void printSectionHeader(std::ostream& out, const std::string& title) const {
+                out << "\n==== " << title << " ====\n";
+        }
+
+        void outputDefaultStats(std::ostream& out) const {
+                writeDefaultStats(out);
+        }
+
+        void outputGameSpecificStats(std::ostream& out) const {
+                writeGameSpecificStats(out);
+        }
 
 	void setNumIterations(long long iterations) {
 		std::lock_guard<std::mutex> lock(statsMutex);
@@ -210,36 +231,30 @@ public:
 		}
 	}
 
-	void recordScatterHit(int prize) {
-		std::lock_guard<std::mutex> lock(statsMutex);
-		scatterHits[prize]++;
-	}
+        void recordScatterHit(int prize) {
+                incrementCounter(scatterHits, prize);
+        }
 
-	void recordTumbleFrequency(int tumbles) {
-		std::lock_guard<std::mutex> lock(statsMutex);
-		tumbleFreq[tumbles]++;
-	}
+        void recordTumbleFrequency(int tumbles) {
+                incrementCounter(tumbleFreq, tumbles);
+        }
 
-	void recordFinalMult(int mult) {
-		std::lock_guard<std::mutex> lock(statsMutex);
-		multFreq[mult]++;
-	}
+        void recordFinalMult(int mult) {
+                incrementCounter(multFreq, mult);
+        }
 
-	void recordFinalMultFree(int mult) {
-		std::lock_guard<std::mutex> lock(statsMutex);
-		multFreqFree[mult]++;
-	}
+        void recordFinalMultFree(int mult) {
+                incrementCounter(multFreqFree, mult);
+        }
 
-	void recordFinalMultFreeByInit(int initMult, int finalMult) {
-		std::lock_guard<std::mutex> lock(statsMutex);
-		multFreqFreeByInit[initMult][finalMult]++;
-	}
+        void recordFinalMultFreeByInit(int initMult, int finalMult) {
+                incrementNestedCounter(multFreqFreeByInit, initMult, finalMult);
+        }
 
-	//record number of free spins
-	void recordFreeSpins(int freeSpins) {
-		std::lock_guard<std::mutex> lock(statsMutex);
-		freeSpinsFreq[freeSpins]++;
-	}
+        //record number of free spins
+        void recordFreeSpins(int freeSpins) {
+                incrementCounter(freeSpinsFreq, freeSpins);
+        }
 
 	//double calculateAverageTumbleFrequency() const {
 	//	long long totalTumbles = 0;
@@ -254,12 +269,12 @@ public:
 	//	return static_cast<double>(totalTumbles) / totalOccurrences;
 	//}
 
-	double calculateAverageFrequency(std::unordered_map<int, long long> freqMap) const {
-		long long totalHits = 0;
-		long long totalOccurrences = 0;
-		for (const auto& pair : freqMap) {
-			totalHits += pair.first * pair.second;
-			totalOccurrences += pair.second;
+        double calculateAverageFrequency(const std::unordered_map<int, long long>& freqMap) const {
+                long long totalHits = 0;
+                long long totalOccurrences = 0;
+                for (const auto& pair : freqMap) {
+                        totalHits += pair.first * pair.second;
+                        totalOccurrences += pair.second;
 		}
 		if (totalOccurrences == 0) {
 			return 0.0;
@@ -301,10 +316,9 @@ public:
 	//    }
 	//}
 
-	void trackFeatureActivation(const std::string& featureName) {
-		std::lock_guard<std::mutex> lock(statsMutex);
-		featureHits[featureName]++; // Increment the count for the feature
-	}
+        void trackFeatureActivation(const std::string& featureName) {
+                incrementCounter(featureHits, featureName);
+        }
 
 	double calculateStandardDeviation(const std::vector<double>& pays) const {
 		if (pays.empty()) return 0.0;
@@ -415,8 +429,8 @@ public:
 		totalWinnings += amount;
 	}
 
-        void outputData(std::ofstream& defaultFile, const std::string& gameSpecificFilename) const {
-                writeDefaultStats(defaultFile);
+        void outputData(std::ostream& defaultStream, const std::string& gameSpecificFilename) const {
+                outputDefaultStats(defaultStream);
 
                 std::ofstream gameSpecificFile(gameSpecificFilename);
                 if (!gameSpecificFile.is_open()) {
@@ -424,7 +438,7 @@ public:
                         return;
                 }
 
-                writeGameSpecificStats(gameSpecificFile);
+                outputGameSpecificStats(gameSpecificFile);
         }
 
 	void printFrequencyTableToFile(const std::string& categoryName, const std::unordered_map<double, long long>& frequencyMap) const {
