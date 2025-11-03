@@ -8,6 +8,8 @@
 #include <memory>
 #include <chrono>
 #include <iomanip>
+#include <sstream>
+#include <algorithm>
 
 #include "RandomUtils.h"   // for LogMode, SimulationMode, RandomLogGenerator (your existing file)
 #include "Stats.h"
@@ -37,6 +39,47 @@ struct Timer {
         auto t1 = std::chrono::high_resolution_clock::now();
         return std::chrono::duration<double>(t1 - t0).count();
     }
+};
+
+class PlayerSimulation {
+public:
+    PlayerSimulation(int startingCredits,
+                     int targetCredits,
+                     std::shared_ptr<GameConfig> cfg,
+                     SymbolStructure& symbolStructure,
+                     Stats& stats)
+        : startingCredits_(startingCredits),
+          targetCredits_(targetCredits),
+          config_(std::move(cfg)),
+          symbolStructure_(symbolStructure),
+          stats_(stats) {}
+
+    bool simulate() {
+        GameInstance instance(config_, symbolStructure_, stats_);
+
+        const double stakePerSpin = static_cast<double>(config_->getCost()) / 100.0;
+        if (stakePerSpin <= 0.0) {
+            return false;
+        }
+
+        double balance = static_cast<double>(startingCredits_) / 100.0;
+        const double target = static_cast<double>(targetCredits_) / 100.0;
+
+        while (balance >= stakePerSpin && balance < target) {
+            instance.playBaseGame(1);
+            const double spinWin = stats_.getLastSpinPayout() / 100.0;
+            balance += spinWin - stakePerSpin;
+        }
+
+        return balance >= target;
+    }
+
+private:
+    int startingCredits_;
+    int targetCredits_;
+    std::shared_ptr<GameConfig> config_;
+    SymbolStructure& symbolStructure_;
+    Stats& stats_;
 };
 
 static void applyCliOverrides(int argc, char** argv, long long& spins, int& threads, LogMode& lm, SimulationMode& sm) {
@@ -160,10 +203,12 @@ int main(int argc, char** argv) {
     else if (simulationMode == CSV_MODE) {
         std::string userGameVersion;
         std::cout << "Enter the game version : ";
-        std::getline(std::cin, userGameVersion);
+        if (!std::getline(std::cin >> std::ws, userGameVersion)) {
+            userGameVersion.clear();
+        }
 
-        const long long defaultSpins = 1000000LL;
-        std::string csvFileName = outputFileBase + "_simulation.csv";
+        const long long spinsToRun = std::max(1LL, numberOfSpins);
+        const std::string csvFileName = baseName + "_simulation.csv";
 
         std::ostringstream csvData;
         csvData << "GAME NAME: " << gameInfo[0] << "\n";
@@ -171,33 +216,37 @@ int main(int argc, char** argv) {
         csvData << "RTP SIMULATION RESULTS\n\n";
         csvData << "PLAYER 1 RTP SIMULATION RESULTS\n";
         csvData << "SPINID,TOTAL STAKE,BALANCE,BASE GAME,FREE SPINS,TOTALWIN,TOTAL WINS,REELSET_ID\n";
+        csvData << std::fixed << std::setprecision(2);
 
-        long long totalWager = 0;
-        double balance = 500.0, totalWins = 0.0; // Starting balance
+        double totalWager = 0.0;
+        double balance = 500.0;
+        double totalWins = 0.0;
+        const double stakePerSpin = costPerSpin / 100.0;
 
-        for (long long i = 0; i < defaultSpins; ++i) {
-            double spinWin = 0.0, freeSpinWin = 0.0, baseGameWin = 0.0, modCost = (costPerSpin / 100);
-            int reelsetId = -1; // You'll need a real getter here
+        Stats csvStats(symbolStructure, rtpHeads, costPerSpin);
+        csvStats.setNumIterations(spinsToRun);
+        GameInstance gameInstance(config, symbolStructure, csvStats);
 
+        for (long long i = 0; i < spinsToRun; ++i) {
+            gameInstance.playBaseGame(1);
 
-            Stats stats(symbolStructure, rtpHeaders, costPerSpin);
-            GameInstance gameInstance(config, symbolStructure, stats);
+            const double spinWin = csvStats.getLastSpinPayout() / 100.0;
+            const double freeSpinWin = csvStats.getFreeSpinPayout() / 100.0;
+            const double baseGameWin = spinWin - freeSpinWin;
+            const int reelsetId = gameInstance.getLastReelSetID();
 
-            gameInstance.playBaseGame(1); // Simulate a single spin
-
-            spinWin = stats.getLastSpinPayout() / 100;
-            freeSpinWin = stats.getFreeSpinPayout() / 100;
-            baseGameWin = spinWin - freeSpinWin;
             totalWins += spinWin;
+            totalWager += stakePerSpin;
+            balance += spinWin - stakePerSpin;
 
-            // Assuming GameInstance has a method to get reelset ID
-            reelsetId = gameInstance.getLastReelSetID(); // <-- implement this if not present
-
-            totalWager += modCost;
-            balance += spinWin - modCost;
-
-            csvData << i << ',' << (i + 1) * modCost << ',' << std::fixed << std::setprecision(2) << balance << ','
-                << baseGameWin << ',' << freeSpinWin << ',' << spinWin << ',' << totalWins << ',' << reelsetId << '\n';
+            csvData << (i + 1) << ','
+                    << totalWager << ','
+                    << balance << ','
+                    << baseGameWin << ','
+                    << freeSpinWin << ','
+                    << spinWin << ','
+                    << totalWins << ','
+                    << reelsetId << '\n';
         }
 
         std::ofstream csvFile(csvFileName);
@@ -208,29 +257,30 @@ int main(int argc, char** argv) {
         csvFile << csvData.str();
         csvFile.close();
 
+        out << "CSV simulation completed. Output file: " << csvFileName << '\n';
         std::cout << "CSV simulation completed. Output file: " << csvFileName << std::endl;
     }
     else if (simulationMode == PLAYER_MODE) {
-        int N = 10000; // Number of players 100000
-        int X = 2000; // Starting credits (enough for 100 spins)
-        int Y = 4000; // Target credits (enough for 200 spins)
+        int numPlayers = 10000;
+        if (numberOfSpins != SimDefaults::SPINS) {
+            numPlayers = static_cast<int>(std::max(1LL, numberOfSpins));
+        }
+
+        const int startingCredits = 2000;
+        const int targetCredits = 4000;
         int successfulPlayers = 0;
 
-        for (int i = 0; i < N; ++i) {
-            // Initialize Stats for each player (if stats aggregation is not needed across players)
-            Stats stats(symbolStructure, rtpHeaders, costPerSpin);
-
-            // Initialize PlayerSimulation with the shared config, symbolStructure, and unique Stats instance
-            PlayerSimulation sim(X, Y, config, symbolStructure, stats);
-
+        for (int i = 0; i < numPlayers; ++i) {
+            Stats stats(symbolStructure, rtpHeads, costPerSpin);
+            PlayerSimulation sim(startingCredits, targetCredits, config, symbolStructure, stats);
             if (sim.simulate()) {
-                successfulPlayers++;
+                ++successfulPlayers;
             }
         }
 
-        double successPercentage = (double)successfulPlayers / N * 100.0;
-        cout << "Percentage of players reaching target credits: " << successPercentage << "%\n";
-        return 0;
+        const double successPercentage = (static_cast<double>(successfulPlayers) / std::max(1, numPlayers)) * 100.0;
+        out << "Percentage of players reaching target credits: " << successPercentage << "%\n";
+        std::cout << "Percentage of players reaching target credits: " << successPercentage << "%\n";
     }
     else {
         std::cerr << "Unknown SimulationMode.\n";
