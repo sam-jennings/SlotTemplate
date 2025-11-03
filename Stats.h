@@ -457,14 +457,12 @@ public:
 			[](int sum, const auto& pair) { return sum + pair.second; });
 	}
 
-	double getFreeSpinPayout() const { //change depending on payVector
-		// Calculate free spin pays
-		double freeSpinPayout = 0.0;
-		for (size_t i = 2; i < 7; ++i) { // Change to the range of indices that represent free spins
-			freeSpinPayout += payVector[i];
-		}
-		return freeSpinPayout;
-	}
+        double getFreeSpinPayout() const {
+                if (lastPay.size() <= 3) {
+                        return 0.0;
+                }
+                return lastPay[3];
+        }
 
 
 	void trackMoneyEntry(double amount) {
